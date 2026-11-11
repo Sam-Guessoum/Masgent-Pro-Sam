@@ -32,14 +32,6 @@ Masgent: Materials Simulation Agent
 ## 🚀 Overview
 Masgent is a materials simulation AI agent that streamlines **DFT workflows and analysis**, **fast machine-learning-potential (MLP) simulations**, and **lightweight ML modeling** for materials science. With automated tools for structure handling, VASP input generation, workflow preparation & analysis, and rapid property prediction, Masgent simplifies complex simulation tasks and boosts productivity for both researchers and students.
 
-## 🎥 Demos
-- **Basic Usage:**  
-  e.g., prepare POSCAR files and generate SQS structures
-  <div align=left><img src='./res/basic_sm.gif' alt='Basic Usage' width='800'/></div>
-
-- **AI Agent:**  
-  e.g., prepare POSCAR files and run EOS calculations simply by chatting
-  <div align=left><img src='./res/ai_sm.gif' alt='AI Agent' width='800'/></div>
 
 ## ⭐️ Why Masgent?
 Most materials-simulation tools—pymatgen, ASE, VASPkit, etc.—require manual scripting, multi-step workflows, and deep HPC expertise to run full DFT or ML-based simulations.
@@ -128,30 +120,6 @@ Masgent removes that barrier by providing a unified, AI-driven interface for str
   - 3.5 Pre-trained Model Applications
     - 3.5.1 Mechanical Properties Prediction in Sc-modified Al-Mg-Si Alloys
     - 3.5.2 Phase Stability & Elastic Properties Prediction in Al-Co-Cr-Fe-Ni High-Entropy Alloys
-
-## 🔧 Installation
-1. Requirements:
-   - Python >= 3.11, < 3.14
-2. Install Masgent:
-    ```bash
-    pip install -U masgent
-    ```
-3. Optional:
-   - Materials Project API key for MP structure access: [materialsproject.org](https://next-gen.materialsproject.org/api)
-   - Setup POTCAR path for Pymatgen, see instructions: [pymatgen.org](https://pymatgen.org/installation.html#potcar-setup)
-
-## ▶️ Usage
-- After installation, simply run:
-    ```bash
-    masgent
-    ```
-- You'll guided by an interactive menu and can invoke the AI agent anytime. Ask anything in AI chat, for example:
-    ```bash
-    > Generate a POSCAR file for NaCl.
-    > Prepare VASP input files for a graphene structure.
-    > Add defects to a silicon crystal POSCAR.
-    > ...
-    ```
 
 ## 🐞 Issues and Suggestions
 Found a bug? Have a feature request?  
