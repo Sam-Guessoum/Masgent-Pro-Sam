@@ -1,0 +1,19 @@
+# Masgent Streamlit frontend. Install Masgent itself from the repo root first:
+#   uv pip install --python .venv\Scripts\python.exe -e .
+# Minimum versions below are the ones this app was developed and tested with.
+streamlit>=1.57
+plotly>=5.24
+pandas>=2.2
+numpy>=1.26
+python-dotenv>=1.0
+psutil>=5.9
+pydantic>=2.7
+# Provided by masgent's own dependencies (listed for clarity):
+pymatgen>=2024.9
+ase>=3.23
+mp-api>=0.43
+pydantic-ai>=1.0
+# Optional backends (pages degrade gracefully when missing):
+# icet, sevenn, chgnet, orb-models, mattersim, optuna, scikit-learn, torch (CUDA 12.8 build for RTX 50-series)
+# Tests:
+pytest>=8

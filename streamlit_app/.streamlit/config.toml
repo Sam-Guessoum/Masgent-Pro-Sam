@@ -1,0 +1,22 @@
+# Script-level config for the Masgent Streamlit app.
+[server]
+address = "localhost"      # local-only: do not expose the app on the network
+maxUploadSize = 1000          # MB; per-file limits are enforced again in the app (Settings)
+runOnSave = false
+fileWatcherType = "auto"
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+
+[theme]
+primaryColor = "#2563eb"
+baseRadius = "medium"
+
+[theme.light]
+primaryColor = "#1d4ed8"
+
+[theme.dark]
+primaryColor = "#60a5fa"
