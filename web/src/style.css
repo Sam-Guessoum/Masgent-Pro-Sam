@@ -105,3 +105,8 @@ aside { background: #101e35; border-right: 1px solid #273b59; }
 .result .crystal-panel { margin-top: 1rem; }
 @media (max-width: 900px) { .materials-layout { grid-template-columns: 1fr; } }
 @media (max-width: 720px) { .shell { grid-template-columns: minmax(0, 1fr); } .explorer-nav { margin-bottom: 0; } }
+.explorer-toolbar label:first-child { width: min(100%, 13rem); }
+.run-graph { flex-basis: 100%; }
+.run-graph summary { cursor: pointer; color: #214fb0; }
+.run-graph img { display: block; max-width: 100%; height: auto; margin-top: .65rem; }
+.use-material { margin-top: .7rem; }
