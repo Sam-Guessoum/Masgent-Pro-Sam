@@ -1,0 +1,12 @@
+Flask>=3.1,<4
+gunicorn>=23,<24
+ase
+colorama
+h5py
+joblib
+numpy
+pandas
+pydantic>=2,<3
+pymatgen
+pymatgen-analysis-defects
+python-dotenv
