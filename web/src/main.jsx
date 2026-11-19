@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
+import { CrystalPreview, MaterialsExplorer } from './materials.jsx';
 
 async function api(path, body) {
   const response = await fetch('/api' + path, body === undefined ? {} : {
@@ -75,6 +76,8 @@ function Brand() {
 function Workspace({ signOut, sessionEnded, globalError }) {
   const [catalog, setCatalog] = useState(null);
   const [toolId, setToolId] = useState('');
+  const [mode, setMode] = useState('explorer');
+  const [preview, setPreview] = useState('');
   const [runId, setRunId] = useState('');
   const [runs, setRuns] = useState([]);
   const [run, setRun] = useState(null);
@@ -123,22 +126,26 @@ function Workspace({ signOut, sessionEnded, globalError }) {
   return <div className="shell">
     <aside>
       <Brand />
-      <nav aria-label="Tools">{groups.map(group => <section key={group}>
+      <nav aria-label="Workspace">
+        <button className="nav-button explorer-nav" aria-current={mode === 'explorer' ? 'page' : undefined}
+          onClick={() => setMode('explorer')}>Materials explorer</button>
+        {groups.map(group => <section key={group}>
         <h2>{group}</h2>
         {catalog.tools.filter(item => item.group === group).map(item =>
-          <button key={item.id} className="nav-button" aria-current={item.id === toolId ? 'page' : undefined}
-            onClick={() => setToolId(item.id)}>{item.title}</button>
+          <button key={item.id} className="nav-button" aria-current={mode === 'tools' && item.id === toolId ? 'page' : undefined}
+            onClick={() => { setToolId(item.id); setMode('tools'); }}>{item.title}</button>
         )}
       </section>)}</nav>
       <button className="secondary" onClick={signOut}>Sign out</button>
     </aside>
     <main className="workspace">
       {(error || globalError) && <p className="error" role="alert">{error || globalError}</p>}
-      {tool && <>
+      {mode === 'explorer' && <MaterialsExplorer api={api} onError={reportError} />}
+      {mode === 'tools' && tool && <>
         <header><p className="group">{tool.group}</p><h1>{tool.title}</h1><p>{tool.description}</p></header>
         <ToolForm key={tool.id} tool={tool} examples={catalog.examples} submit={submit} />
       </>}
-      <section className="panel runs" aria-label="Results library">
+      {mode === 'tools' && <section className="panel runs" aria-label="Results library">
         <h2>Results library</h2>
         {runs.length ? <ul>{runs.map(item => <li key={item.run_id}>
           <button className="run-row" aria-pressed={runId === item.run_id} onClick={() => {
@@ -150,11 +157,17 @@ function Workspace({ signOut, sessionEnded, globalError }) {
           {run.message && <p>{run.message}</p>}
           {['queued', 'running'].includes(run.status) && <button className="secondary"
             onClick={() => api('/runs/' + runId + '/cancel', {}).catch(reportError)}>Cancel run</button>}
-          {run.files.length > 0 && <ul>{run.files.map(file => <li key={file}>
-            <a href={`/api/runs/${runId}/files/${file.split('/').map(encodeURIComponent).join('/')}`}>{file}</a>
-          </li>)}</ul>}
+          {run.files.length > 0 && <ul>{run.files.map(file => {
+            const path = file.split('/').map(encodeURIComponent).join('/');
+            const canPreview = /(?:^|\/)(?:POSCAR|CONTCAR)$|\.(?:vasp|poscar|cif)$/i.test(file);
+            return <li key={file} className="result-file">
+              <a href={`/api/runs/${runId}/files/${path}`}>{file}</a>
+              {canPreview && <button className="secondary" onClick={() => setPreview(`/runs/${runId}/structure/${path}`)}>View in 3D</button>}
+            </li>;
+          })}</ul>}
+          {preview.startsWith(`/runs/${runId}/structure/`) && <CrystalPreview key={preview} endpoint={preview} api={api} onError={reportError} />}
         </div>}
-      </section>
+      </section>}
     </main>
   </div>;
 }
