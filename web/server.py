@@ -1,5 +1,6 @@
 """Same-origin API for the Masgent React workspace."""
 import base64
+import csv
 import hmac
 from importlib.util import find_spec
 import math
@@ -21,7 +22,7 @@ from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 WEB = Path(__file__).resolve().parent
 sys.path.insert(0, str(WEB.parent / "streamlit_app"))
 
-from core import examples
+from core import examples, parsers
 from core.catalog import PAGES
 from core.registry import form_fields, get_tool, validate
 from core.runner import RunManager
@@ -239,7 +240,10 @@ def create_app():
             abort(404)
         result = run.result() or {}
         return {"run_id": run.run_id, "title": run.meta["tool_title"], "status": run.status,
-                "message": result.get("message"), "files": [p.relative_to(run.files_dir).as_posix()
+                "message": result.get("message"),
+                "metrics": {key: value for key, value in result.items()
+                            if type(value) in (float, int) and math.isfinite(value)},
+                "files": [p.relative_to(run.files_dir).as_posix()
                                                            for p in run.output_files()]}
 
     @app.post("/api/runs/<run_id>/cancel")
@@ -271,6 +275,16 @@ def create_app():
             if file.read(8) != b"\x89PNG\r\n\x1a\n":
                 abort(415)
         return send_file(path, mimetype="image/png")
+
+    @app.get("/api/runs/<run_id>/data/<path:name>")
+    def result_data(run_id, name):
+        path = result_path(run_id, name)
+        if path.stat().st_size > 10_000_000:
+            return {"error": "This file exceeds the preview limit. Download it to view all values."}, 413
+        try:
+            return run_data(path)
+        except (ValueError, OSError, csv.Error):
+            return {"error": "Could not read the calculation data."}, 422
 
     @app.get("/api/materials-project/status")
     def materials_project_status():
@@ -495,3 +509,46 @@ def stage_upload(value, kind, folder):
     path = folder / "POSCAR"
     Poscar(structure).write_file(path)
     return path
+
+
+def run_data(path):
+    if path.name.lower() == "elastic_constants.txt":
+        parsed = parsers.parse_elastic_txt(path)
+        return {"headers": ["Component", "C1", "C2", "C3", "C4", "C5", "C6"],
+                "rows": [[f"C{i}", *row] for i, row in enumerate(parsed.get("C") or [], 1)],
+                "metrics": parsed.get("moduli", {}), "matrix": True}
+    if path.name.lower() == "masgent_mlps_md.log":
+        rows = parsers.parse_md_log(path)
+        columns = ["time_ps", "T", "etot", "epot", "ekin"]
+        return {"headers": ["Time (ps)", "Temperature (K)", "Total energy (eV/atom)",
+                            "Potential energy (eV/atom)", "Kinetic energy (eV/atom)"],
+                "rows": [[row[key] for key in columns] for row in rows[:2000]], "truncated": len(rows) > 2000}
+    if path.name.lower() == "masgent_mlps_single.log":
+        rows = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            fields = line.split()
+            if len(fields) >= 5 and fields[0].rstrip(":") == "LBFGS" and fields[1].isdigit():
+                rows.append([int(fields[1]), numeric_cell(fields[3]), numeric_cell(fields[4])])
+        return {"headers": ["Optimizer step", "Energy (eV)", "Maximum force (eV/Å)"],
+                "rows": rows[:2000], "truncated": len(rows) > 2000}
+    if path.suffix.lower() != ".csv":
+        return {"error": "This file format has no calculation preview."}, 415
+    with path.open(encoding="utf-8-sig", newline="") as file:
+        reader = csv.reader(file)
+        headers = next(reader, [])[:40]
+        rows = []
+        for row in reader:
+            if len(rows) == 2000:
+                return {"headers": headers, "rows": rows, "truncated": True}
+            rows.append([numeric_cell(cell) for cell in row[:len(headers)]])
+    return {"headers": headers, "rows": rows}
+
+
+def numeric_cell(cell):
+    try:
+        number = float(cell)
+        if math.isfinite(number):
+            return number
+    except ValueError:
+        pass
+    return cell[:160]
