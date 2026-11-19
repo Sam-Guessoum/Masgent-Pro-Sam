@@ -410,7 +410,7 @@ def geometry_payload(structure):
     }
 
 
-MP_ID = re.compile(r"(?:mp|mvc)-[0-9]{1,15}")
+MP_ID = re.compile(r"(?:mp|mvc)-[A-Za-z0-9]{1,32}")
 
 
 def mp_summary(params):
