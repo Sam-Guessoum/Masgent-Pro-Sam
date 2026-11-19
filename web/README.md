@@ -23,3 +23,9 @@ Run `gunicorn --bind 127.0.0.1:8080 --workers 1 --threads 4 'web.server:create_a
 Build from the repository root with `docker build -f web/Dockerfile -t masgent-web .`. Deploy the container to an HTTPS host with one replica, leaving `MASGENT_WEB_LOCAL_HTTP` unset. Configure the two secrets on the host and mount a writable persistent volume at `/data` for container UID 10001. The app listens on port 8080. Anyone with the password shares the same workspace and run history.
 
 The GitHub repository stores the source. An HTTPS container host runs the server, authenticates requests and executes the simulation workers.
+
+## Materials Project and ML potentials
+
+Set `MP_API_KEY` as a host secret to enable the authenticated Materials Project catalog. Browse by formula, material ID, or periodic-table elements. Result pages fetch crystal coordinates on demand.
+
+Use `docker build --build-arg INSTALL_CHGNET=1 -f web/Dockerfile -t masgent-web-mlp .` to add CHGNet and CPU PyTorch. The run form offers the engines installed on the host. Other engines require their corresponding Python packages and model weights. Validate memory and runtime limits before enabling them on a shared host. PNG plots produced by successful runs can be viewed in Results Library.
