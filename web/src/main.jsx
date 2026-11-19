@@ -78,6 +78,7 @@ function Workspace({ signOut, sessionEnded, globalError }) {
   const [toolId, setToolId] = useState('');
   const [mode, setMode] = useState('explorer');
   const [preview, setPreview] = useState('');
+  const [material, setMaterial] = useState('');
   const [runId, setRunId] = useState('');
   const [runs, setRuns] = useState([]);
   const [run, setRun] = useState(null);
@@ -140,10 +141,11 @@ function Workspace({ signOut, sessionEnded, globalError }) {
     </aside>
     <main className="workspace">
       {(error || globalError) && <p className="error" role="alert">{error || globalError}</p>}
-      {mode === 'explorer' && <MaterialsExplorer api={api} onError={reportError} />}
+      {mode === 'explorer' && <MaterialsExplorer api={api} onError={reportError} useMaterial={id => { setMaterial(id); setMode('tools'); }} />}
       {mode === 'tools' && tool && <>
         <header><p className="group">{tool.group}</p><h1>{tool.title}</h1><p>{tool.description}</p></header>
-        <ToolForm key={tool.id} tool={tool} examples={catalog.examples} submit={submit} />
+        {tool.unavailable ? <p className="panel">No ML-potential engine is installed on this server.</p> :
+          <ToolForm key={tool.id} tool={tool} examples={catalog.examples} material={material} submit={submit} />}
       </>}
       {mode === 'tools' && <section className="panel runs" aria-label="Results library">
         <h2>Results library</h2>
@@ -159,9 +161,14 @@ function Workspace({ signOut, sessionEnded, globalError }) {
             onClick={() => api('/runs/' + runId + '/cancel', {}).catch(reportError)}>Cancel run</button>}
           {run.files.length > 0 && <ul>{run.files.map(file => {
             const path = file.split('/').map(encodeURIComponent).join('/');
+            const isPlot = /\.png$/i.test(file);
             const canPreview = /(?:^|\/)(?:POSCAR|CONTCAR)$|\.(?:vasp|poscar|cif)$/i.test(file);
             return <li key={file} className="result-file">
               <a href={`/api/runs/${runId}/files/${path}`}>{file}</a>
+              {isPlot && <details className="run-graph">
+                <summary>Show graph</summary>
+                <img src={`/api/runs/${runId}/plot/${path}`} alt={file.split('/').pop().replaceAll('_', ' ')} loading="lazy" />
+              </details>}
               {canPreview && <button className="secondary" onClick={() => setPreview(`/runs/${runId}/structure/${path}`)}>View in 3D</button>}
             </li>;
           })}</ul>}
@@ -172,19 +179,26 @@ function Workspace({ signOut, sessionEnded, globalError }) {
   </div>;
 }
 
-function ToolForm({ tool, examples, submit }) {
+function ToolForm({ tool, examples, material, submit }) {
   const [values, setValues] = useState(() => Object.fromEntries(tool.fields.map(field => [
-    field.name, field.kind === 'structure' ? examples[0] || '' : field.default ?? '',
+    field.name, field.kind === 'structure' ? (material ? 'mp:' + material : examples[0] || '') : field.default ?? '',
   ])));
   const [busy, setBusy] = useState(false);
   const set = (name, value) => setValues(previous => ({ ...previous, [name]: value }));
-  const fields = tool.fields.filter(field => field.name !== 'custom_kppa' || values.accuracy_level === 'Custom');
+  const fields = tool.fields.filter(field => {
+    if (field.name === 'custom_kppa') return values.accuracy_level === 'Custom';
+    if (field.name === 'scale_factors') return values.task_type === 'eos';
+    if (['temperature', 'md_steps', 'md_timestep'].includes(field.name)) return values.task_type === 'md';
+    if (['max_steps', 'fmax'].includes(field.name)) return values.task_type !== 'md';
+    return true;
+  });
 
   async function run(event) {
     event.preventDefault();
     const params = Object.fromEntries(fields.map(field => {
       let value = values[field.name];
       if (field.kind === 'miller' && !Array.isArray(value)) value = value.trim().split(/\s+/).map(Number);
+      if (field.kind === 'list_float' && !Array.isArray(value)) value = value.trim().split(/[\s,]+/).map(Number);
       if (['int', 'float', 'number'].includes(field.type) && value !== '') value = Number(value);
       return [field.name, value];
     }));
@@ -195,12 +209,12 @@ function ToolForm({ tool, examples, submit }) {
   return <form className="panel tool-form" onSubmit={run}>
     <div className="fields">{fields.map(field => {
       const value = values[field.name];
-      const options = field.kind === 'structure' ? examples : field.options;
+      const options = field.kind === 'structure' ? (material ? ['mp:' + material, ...examples] : examples) : field.options;
       let control;
       if (options) {
         control = <select value={value} required onChange={event => set(field.name, event.target.value)}>
           <option value="" disabled>Choose an option</option>
-          {options.map(option => <option key={option}>{option}</option>)}
+          {options.map(option => <option key={option} value={option}>{option.startsWith('mp:') ? option.slice(3) + ' · Materials Project' : option}</option>)}
         </select>;
       } else if (field.type === 'bool') {
         control = <input type="checkbox" checked={Boolean(value)} onChange={event => set(field.name, event.target.checked)} />;
