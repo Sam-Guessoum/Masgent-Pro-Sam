@@ -161,16 +161,46 @@ def create_app():
             abort(409)
         return {"cancelled": True}
 
-    @app.get("/api/runs/<run_id>/files/<path:name>")
-    def download(run_id, name):
+    def result_path(run_id, name):
         run = storage.get_run(run_id)
         if run is None:
             abort(404)
         for path in run.output_files():
             if not path.is_symlink() and path.relative_to(run.files_dir).as_posix() == name:
                 if path.resolve().is_relative_to(run.files_dir.resolve()):
-                    return send_file(path, as_attachment=True, mimetype="application/octet-stream")
+                    return path
         abort(404)
+
+    @app.get("/api/runs/<run_id>/files/<path:name>")
+    def download(run_id, name):
+        return send_file(result_path(run_id, name), as_attachment=True, mimetype="application/octet-stream")
+
+    @app.get("/api/structures")
+    def structures():
+        from pymatgen.io.vasp import Poscar
+
+        entries = []
+        for name in examples_list:
+            structure = Poscar.from_file(examples.structure_path(name), check_for_potcar=False).structure
+            entries.append(dict(name=name, formula=structure.composition.reduced_formula,
+                                elements=[element.symbol for element in structure.composition.elements]))
+        return jsonify(entries)
+
+    @app.get("/api/structures/<int:index>")
+    def example_structure(index):
+        if not 0 <= index < len(examples_list):
+            abort(404)
+        return crystal_geometry(examples.structure_path(examples_list[index]), "poscar")
+
+    @app.get("/api/runs/<run_id>/structure/<path:name>")
+    def result_structure(run_id, name):
+        path = result_path(run_id, name)
+        suffix = path.suffix.lower()
+        if path.name.upper() in {"POSCAR", "CONTCAR"} or suffix in {".vasp", ".poscar"}:
+            return crystal_geometry(path, "poscar")
+        if suffix == ".cif":
+            return crystal_geometry(path, "cif")
+        abort(415)
 
     @app.get("/")
     def homepage():
@@ -205,3 +235,28 @@ def validated_value(field, value, example_names):
         if low <= value <= high and (field.spec.base_type != "int" or type(value) is int):
             return value
     raise ValueError(field.name)
+
+
+def crystal_geometry(path, file_format):
+    from pymatgen.core import Structure
+    from pymatgen.io.vasp import Poscar
+
+    if path.stat().st_size > 2_000_000:
+        return {"error": "This structure is too large to preview."}, 413
+    try:
+        if file_format == "poscar":
+            structure = Poscar.from_file(path, check_for_potcar=False).structure
+        else:
+            structure = Structure.from_file(path)
+    except (ValueError, TypeError, OSError, IndexError):
+        return {"error": "Could not read this crystal structure."}, 422
+    if len(structure) > 4000:
+        return {"error": "The 3D viewer supports structures with up to 4,000 sites."}, 413
+    return {
+        "formula": structure.composition.reduced_formula,
+        "lattice": structure.lattice.matrix.tolist(),
+        "lengths": list(structure.lattice.abc),
+        "angles": list(structure.lattice.angles),
+        "sites": [{"element": max(site.species, key=site.species.get).symbol, "position": site.coords.tolist()}
+                  for site in structure],
+    }
