@@ -144,7 +144,7 @@ function Workspace({ signOut, sessionEnded, globalError }) {
       {mode === 'explorer' && <MaterialsExplorer api={api} onError={reportError} useMaterial={id => { setMaterial(id); setMode('tools'); }} />}
       {mode === 'tools' && tool && <>
         <header><p className="group">{tool.group}</p><h1>{tool.title}</h1><p>{tool.description}</p></header>
-        {tool.unavailable ? <p className="panel">No ML-potential engine is installed on this server.</p> :
+        {tool.unavailable ? <p className="panel">{tool.unavailable}</p> :
           <ToolForm key={tool.id} tool={tool} examples={catalog.examples} material={material} submit={submit} />}
       </>}
       {mode === 'tools' && <section className="panel runs" aria-label="Results library">
@@ -184,26 +184,36 @@ function ToolForm({ tool, examples, material, submit }) {
     field.name, field.kind === 'structure' ? (material ? 'mp:' + material : examples[0] || '') : field.default ?? '',
   ])));
   const [busy, setBusy] = useState(false);
+  const [uploads, setUploads] = useState({});
+  const [inputError, setInputError] = useState('');
   const set = (name, value) => setValues(previous => ({ ...previous, [name]: value }));
   const fields = tool.fields.filter(field => {
     if (field.name === 'custom_kppa') return values.accuracy_level === 'Custom';
-    if (field.name === 'scale_factors') return values.task_type === 'eos';
-    if (['temperature', 'md_steps', 'md_timestep'].includes(field.name)) return values.task_type === 'md';
+    if (field.name === 'scale_factors' && 'task_type' in values) return values.task_type === 'eos';
+    if (['temperature', 'md_steps', 'md_timestep'].includes(field.name) && 'task_type' in values) return values.task_type === 'md';
     if (['max_steps', 'fmax'].includes(field.name)) return values.task_type !== 'md';
+    if (field.name === 'kpoint_levels') return values.test_type !== 'encut';
+    if (field.name === 'encut_levels') return values.test_type !== 'kpoints';
     return true;
   });
 
   async function run(event) {
     event.preventDefault();
-    const params = Object.fromEntries(fields.map(field => {
+    setInputError('');
+    setBusy(true);
+    try {
+      const params = Object.fromEntries(await Promise.all(fields.map(async field => {
+      const file = uploads[field.name];
+      if (file) return [field.name, { filename: file.name, upload: await encodeFile(file) }];
       let value = values[field.name];
       if (field.kind === 'miller' && !Array.isArray(value)) value = value.trim().split(/\s+/).map(Number);
-      if (field.kind === 'list_float' && !Array.isArray(value)) value = value.trim().split(/[\s,]+/).map(Number);
+      if (['list_float', 'list_int'].includes(field.kind) && !Array.isArray(value)) value = value.trim().split(/[\s,]+/).map(Number);
       if (['int', 'float', 'number'].includes(field.type) && value !== '') value = Number(value);
       return [field.name, value];
-    }));
-    setBusy(true);
-    try { await submit(params); } finally { setBusy(false); }
+      })));
+      await submit(params);
+    } catch (error) { setInputError(error.message); }
+    finally { setBusy(false); }
   }
 
   return <form className="panel tool-form" onSubmit={run}>
@@ -211,8 +221,10 @@ function ToolForm({ tool, examples, material, submit }) {
       const value = values[field.name];
       const options = field.kind === 'structure' ? (material ? ['mp:' + material, ...examples] : examples) : field.options;
       let control;
-      if (options) {
-        control = <select value={value} required onChange={event => set(field.name, event.target.value)}>
+      if (field.kind === 'folder') {
+        control = null;
+      } else if (options) {
+        control = <select value={value} required={!uploads[field.name]} disabled={Boolean(uploads[field.name])} onChange={event => set(field.name, event.target.value)}>
           <option value="" disabled>Choose an option</option>
           {options.map(option => <option key={option} value={option}>{option.startsWith('mp:') ? option.slice(3) + ' · Materials Project' : option}</option>)}
         </select>;
@@ -225,10 +237,30 @@ function ToolForm({ tool, examples, material, submit }) {
           value={Array.isArray(value) ? value.join(' ') : value}
           onChange={event => set(field.name, event.target.value)} />;
       }
-      return <label key={field.name}>{field.label}{control}</label>;
+      const accept = { structure: '.cif,.vasp,.poscar,.contcar,*', folder: '.zip', csv: '.csv' }[field.kind];
+      return <div key={field.name} className="tool-field">
+        {control && <label>{field.label}{control}</label>}
+        {accept && <label>{field.kind === 'folder' ? field.label + ' (ZIP)' : 'Or upload ' + field.label.toLowerCase()}
+          <input type="file" accept={accept} required={field.kind === 'folder'} onChange={event => {
+            const file = event.target.files[0];
+            setUploads(current => ({ ...current, [field.name]: file }));
+          }} />
+        </label>}
+      </div>;
     })}</div>
+    {inputError && <p className="error" role="alert">{inputError}</p>}
     <button className="primary" disabled={busy}>{busy ? 'Submitting…' : 'Run tool'}</button>
   </form>;
+}
+
+function encodeFile(file) {
+  if (file.size > 10 * 1024 * 1024) throw new Error('Each upload must be 10 MB or smaller.');
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = () => reject(new Error('Could not read ' + file.name + '.'));
+    reader.readAsDataURL(file);
+  });
 }
 
 createRoot(document.getElementById('root')).render(<App />);
