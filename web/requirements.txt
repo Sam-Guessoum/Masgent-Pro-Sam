@@ -10,3 +10,5 @@ pydantic>=2,<3
 pymatgen
 pymatgen-analysis-defects
 python-dotenv
+requests>=2.32,<3
+seaborn
