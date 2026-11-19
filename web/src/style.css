@@ -53,3 +53,55 @@ a { color: #214fb0; }
   .shell { grid-template-columns: 1fr; }
   nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; margin: 1rem 0; }
 }
+
+:root { background: #f4f7fb; color: #172640; }
+.shell { grid-template-columns: 15.5rem minmax(0, 1fr); }
+aside { background: #101e35; border-right: 1px solid #273b59; }
+.explorer-nav { margin-bottom: 1.25rem; font-weight: 700; }
+.workspace { max-width: 98rem; }
+.explorer-heading p { max-width: 42rem; }
+.elements-panel { overflow: hidden; }
+.explorer-toolbar { display: flex; align-items: end; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.1rem; }
+.explorer-toolbar label { width: min(100%, 26rem); }
+.clear-filters { min-height: 2.65rem; color: #315487; }
+.periodic-scroll { overflow-x: auto; padding: 4px 4px 8px; }
+.periodic-table { display: grid; grid-template-columns: repeat(18, minmax(2.05rem, 1fr)); gap: .28rem; min-width: 43rem; }
+.element-tile, .series-marker { min-width: 0; border: 1px solid #c5d5e9; border-radius: .35rem; min-height: 2.55rem; }
+.element-tile { position: relative; display: grid; align-content: center; justify-items: center; color: #173253; background: #e7eefb; padding: .17rem .1rem; line-height: 1; }
+.element-tile small { font-size: .57rem; margin-bottom: .14rem; }
+.element-tile strong { font-size: .88rem; }
+.element-tile:hover { border-color: #265eb1; }
+.element-tile[aria-pressed=true] { background: #174da1; border-color: #174da1; color: white; }
+.alkali-metal { background: #fbe6e3; border-color: #efcbc4; }
+.alkaline-earth { background: #faefd9; border-color: #ecd8ae; }
+.metalloid { background: #e2efec; border-color: #c3ddda; }
+.nonmetal { background: #def2e8; border-color: #c0e3d0; }
+.halogen { background: #eeebfb; border-color: #dbd2f3; }
+.noble-gas { background: #e2edfc; border-color: #c6d8f3; }
+.post-transition { background: #e6eef3; border-color: #c9dce7; }
+.lanthanide { background: #fae9f0; border-color: #efcfe0; }
+.actinide { background: #f3e9f7; border-color: #e6d2ee; }
+.series-marker { display: grid; place-items: center; color: #56667b; font-size: .57rem; background: #f0f4f8; }
+.element-filters { display: flex; flex-wrap: wrap; gap: .45rem; margin-top: .6rem; }
+.element-filters button { border: 1px solid #adc3e6; background: #eff5ff; border-radius: 1rem; padding: .2rem .6rem; color: #214c8c; }
+.materials-layout { display: grid; grid-template-columns: minmax(14rem, .7fr) minmax(0, 1.5fr); align-items: start; gap: 1rem; margin-top: 1rem; }
+.material-list h2, .crystal-panel h2 { font-size: 1.14rem; margin-bottom: .65rem; }
+.count { font-size: .75rem; color: #305486; background: #ecf3fc; border-radius: .4rem; padding: .12rem .35rem; }
+.material-row { display: flex; align-items: center; gap: .65rem; width: 100%; text-align: left; border: 1px solid #e0e8f2; border-radius: .45rem; margin-top: .33rem; padding: .46rem .55rem; background: white; color: #193657; }
+.material-row[aria-pressed=true], .material-row:hover { background: #eef5ff; border-color: #a7c3ea; }
+.material-row span { font-size: .8rem; color: #4e6078; }
+.crystal-stage { border-radius: .65rem; background: radial-gradient(ellipse at center, #203451, #101c30 80%); }
+.crystal-stage canvas { display: block; width: 100%; height: clamp(16rem, 35vw, 26rem); cursor: grab; touch-action: none; border-radius: .65rem; }
+.crystal-stage canvas:active { cursor: grabbing; }
+.viewer-toolbar, .crystal-legend { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-top: .65rem; }
+.viewer-toolbar span { color: #52637d; margin-right: auto; font-size: .78rem; }
+.viewer-toolbar button { background: #f6f9fd; color: #27466d; border: 1px solid #cbd8e8; border-radius: .38rem; padding: .2rem .55rem; font-size: .8rem; }
+.crystal-legend > span { color: #324d72; font-size: .78rem; background: #edf3fb; border-radius: 1rem; padding: .18rem .55rem; }
+.crystal-metrics { display: flex; flex-wrap: wrap; gap: .75rem 1.4rem; border-top: 1px solid #e4ebf4; margin: .75rem 0 0; padding: .65rem 0 0; }
+.crystal-metrics dt { color: #586a83; font-size: .74rem; }
+.crystal-metrics dd { margin: 0; font-size: .86rem; font-weight: 650; }
+.result-file { display: flex; gap: .65rem; flex-wrap: wrap; align-items: center; margin: .4rem 0; }
+.result-file button { margin-top: 0; }
+.result .crystal-panel { margin-top: 1rem; }
+@media (max-width: 900px) { .materials-layout { grid-template-columns: 1fr; } }
+@media (max-width: 720px) { .shell { grid-template-columns: minmax(0, 1fr); } .explorer-nav { margin-bottom: 0; } }
