@@ -110,3 +110,5 @@ aside { background: #101e35; border-right: 1px solid #273b59; }
 .run-graph summary { cursor: pointer; color: #214fb0; }
 .run-graph img { display: block; max-width: 100%; height: auto; margin-top: .65rem; }
 .use-material { margin-top: .7rem; }
+.tool-field { display: grid; align-content: start; gap: .45rem; }
+.tool-field input[type=file] { font-size: .8rem; }
