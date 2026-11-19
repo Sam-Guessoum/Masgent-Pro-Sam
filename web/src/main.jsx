@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
+import { CalculationResults } from './results.jsx';
 import { CrystalPreview, MaterialsExplorer } from './materials.jsx';
 
 async function api(path, body) {
@@ -159,16 +160,12 @@ function Workspace({ signOut, sessionEnded, globalError }) {
           {run.message && <p>{run.message}</p>}
           {['queued', 'running'].includes(run.status) && <button className="secondary"
             onClick={() => api('/runs/' + runId + '/cancel', {}).catch(reportError)}>Cancel run</button>}
-          {run.files.length > 0 && <ul>{run.files.map(file => {
+          {!['queued', 'running'].includes(run.status) && <CalculationResults key={runId} run={run} api={api} onError={reportError} />}
+          {run.files.length > 0 && <ul aria-label="Output files">{run.files.map(file => {
             const path = file.split('/').map(encodeURIComponent).join('/');
-            const isPlot = /\.png$/i.test(file);
             const canPreview = /(?:^|\/)(?:POSCAR|CONTCAR)$|\.(?:vasp|poscar|cif)$/i.test(file);
             return <li key={file} className="result-file">
               <a href={`/api/runs/${runId}/files/${path}`}>{file}</a>
-              {isPlot && <details className="run-graph">
-                <summary>Show graph</summary>
-                <img src={`/api/runs/${runId}/plot/${path}`} alt={file.split('/').pop().replaceAll('_', ' ')} loading="lazy" />
-              </details>}
               {canPreview && <button className="secondary" onClick={() => setPreview(`/runs/${runId}/structure/${path}`)}>View in 3D</button>}
             </li>;
           })}</ul>}
