@@ -1,10 +1,12 @@
 """Same-origin API for the Masgent React workspace."""
+import base64
 import hmac
 from importlib.util import find_spec
 import math
 import os
 import re
 import sys
+from zipfile import BadZipFile
 from contextlib import ExitStack
 from datetime import timedelta
 from pathlib import Path
@@ -24,7 +26,8 @@ from core.catalog import PAGES
 from core.registry import form_fields, get_tool, validate
 from core.runner import RunManager
 from core.storage import Storage
-from core.settings import get_secret
+from core.settings import get_secret, load_settings
+from core.paths import UnsafePathError
 
 MLP_TOOL = "run_simulation_using_mlps"
 MLP_PACKAGES = {"CHGNet": "chgnet", "SevenNet": "sevenn", "Orb-v3": "orb_models", "MatterSim": "mattersim"}
@@ -37,6 +40,22 @@ TOOLS = (
     "generate_vasp_poscar_with_interstitial_defects",
     "generate_surface_slab_from_poscar",
     "customize_vasp_kpoints_with_accuracy",
+    "generate_interface_from_poscars",
+    "generate_vasp_poscar",
+    "generate_vasp_inputs_from_poscar:incar",
+    "generate_vasp_inputs_from_poscar",
+    "generate_vasp_workflow_of_convergence_tests",
+    "generate_vasp_workflow_of_eos",
+    "generate_vasp_workflow_of_elastic_constants",
+    "generate_vasp_workflow_of_aimd",
+    "generate_vasp_workflow_of_neb",
+    "analyze_vasp_workflow_of_convergence_tests",
+    "analyze_vasp_workflow_of_eos",
+    "analyze_vasp_workflow_of_elastic_constants",
+    "analyze_vasp_workflow_of_aimd",
+    "analyze_vasp_workflow_of_neb",
+    "analyze_features_for_machine_learning",
+    "reduce_dimensions_for_machine_learning",
 )
 
 
@@ -55,7 +74,7 @@ def create_app():
         SESSION_COOKIE_SAMESITE="Strict",
         PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
         SESSION_REFRESH_EACH_REQUEST=False,
-        MAX_CONTENT_LENGTH=16384,
+        MAX_CONTENT_LENGTH=16 * 1024 * 1024,
     )
     storage = Storage(os.environ.get("MASGENT_WEB_DATA", "masgent_projects/web"))
     manager = RunManager(storage, max_concurrent=1, warm_spares=0)
@@ -64,9 +83,25 @@ def create_app():
     fields_by_tool = {tool: [f for f in form_fields(tool) if f.name != "input_format"]
                       for tool in (*TOOLS, MLP_TOOL)}
 
+    def unavailable_reason(tool):
+        ui, _ = get_tool(tool)
+        if tool == MLP_TOOL and not model_options:
+            return "No ML-potential engine is installed on this server."
+        if tool == "generate_vasp_poscar" and not get_secret("MP_API_KEY"):
+            return "Add MP_API_KEY in the host environment to enable this tool."
+        if "PSP" in ui.needs:
+            psp_dir = load_settings().psp_dir or os.environ.get("PMG_VASP_PSP_DIR")
+            if not psp_dir or not Path(psp_dir).is_dir():
+                return "This workflow requires a licensed VASP pseudopotential library configured on the host."
+        return None
+
     def field_options(field):
+        if field.ui.kind == "csv":
+            return [name for name in examples.ML_FILES if name.endswith(("compositions)", "properties)")) and examples.ml_path(name)]
         if field.name == "mlps_type":
             return model_options
+        if field.name == "vasp_input_sets":
+            return ["MPMetalRelaxSet", "MPRelaxSet", "MPStaticSet", "MPNonSCFBandSet", "MPNonSCFDOSSet", "MPMDSet"]
         return field.ui.options or field.spec.literal_options
 
     def field_default(field):
@@ -128,7 +163,7 @@ def create_app():
         for tool, fields in fields_by_tool.items():
             ui, _ = get_tool(tool)
             tools.append(dict(id=tool, title=ui.title, group=PAGES[ui.page][0], description=ui.summary,
-                              unavailable=tool == MLP_TOOL and not model_options, fields=[
+                              unavailable=unavailable_reason(tool), fields=[
                 dict(name=f.name, label=f.ui.label or f.name, kind=f.ui.kind, type=f.spec.base_type,
                      default=field_default(f), options=field_options(f),
                      min=f.ui.min, max=f.ui.max, required=f.spec.required)
@@ -149,8 +184,9 @@ def create_app():
         tool, raw = body["tool"], body["params"]
         if tool not in fields_by_tool:
             abort(404)
-        if tool == MLP_TOOL and not model_options:
-            return {"error": "No ML-potential engine is installed on this server."}, 503
+        reason = unavailable_reason(tool)
+        if reason:
+            return {"error": reason}, 503
         params = {"input_format": "POSCAR"} if tool == "convert_structure_format" else {}
         for field in fields_by_tool[tool]:
             if field.name == "custom_kppa" and raw.get("accuracy_level") != "Custom":
@@ -166,6 +202,14 @@ def create_app():
                 return {"error": f"Check {field.ui.label or field.name}."}, 400
         with ExitStack() as inputs:
             for name, value in params.items():
+                if isinstance(value, dict) and "upload" in value:
+                    folder = Path(inputs.enter_context(TemporaryDirectory(dir=storage.root / "uploads")))
+                    spec = next(field for field in fields_by_tool[tool] if field.name == name)
+                    try:
+                        params[name] = str(stage_upload(value, spec.ui.kind, folder))
+                    except (ValueError, TypeError, OSError, BadZipFile, UnsafePathError):
+                        return {"error": f"Could not read the file supplied for {spec.ui.label or name}."}, 422
+                    continue
                 if not isinstance(value, str) or not value.startswith("mp:"):
                     continue
                 from pymatgen.io.vasp import Poscar
@@ -301,6 +345,16 @@ def create_app():
 
 def validated_value(field, value, example_names, options):
     kind = field.ui.kind
+    if kind in {"structure", "folder", "csv"} and isinstance(value, dict):
+        if isinstance(value.get("upload"), str) and isinstance(value.get("filename"), str):
+            return value
+    if kind == "csv" and isinstance(value, str) and value in options:
+        return "example_ml:" + value
+    if field.name == "formula" and isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9.()\-]{1,80}", value):
+        return value
+    if kind == "list_int" and isinstance(value, list) and 1 <= len(value) <= 24:
+        if all(type(n) is int and 1 <= n <= 100000 for n in value):
+            return value
     if kind == "structure" and isinstance(value, str) and value in example_names:
         return f"example:{value}"
     if kind == "structure" and isinstance(value, str) and value.startswith("mp:") and MP_ID.fullmatch(value[3:]):
@@ -391,3 +445,53 @@ def mp_structure(material_id):
         return Structure.from_dict(data["data"][0]["structure"]), None
     except (KeyError, ValueError, TypeError, IndexError):
         return None, ({"error": "Materials Project returned an unreadable structure."}, 502)
+
+
+def stage_upload(value, kind, folder):
+    from pymatgen.core import Structure
+    from pymatgen.io.vasp import Poscar
+
+    data = base64.b64decode(value["upload"], validate=True)
+    filename = value["filename"].lower()
+    if kind == "folder":
+        if not filename.endswith(".zip") or len(data) > 10 * 1024 * 1024:
+            raise ValueError("Expected a ZIP archive of at most 10 MB.")
+        files = Storage.safe_extract_zip(data, folder, max_total_mb=80, max_files=800)
+        candidates = [path for path in files if path.name in examples.ANALYSIS_WHITELIST]
+        if not candidates:
+            raise ValueError("No VASP outputs found.")
+        root = folder
+        first_parts = {p.relative_to(root).parts[0] for p in candidates}
+        if len(first_parts) == 1 and not any(p.parent == root for p in candidates):
+            child = root / next(iter(first_parts))
+            if child.is_dir() and not any(p.parent == child for p in candidates):
+                root = child
+        return root
+    if kind == "csv":
+        import csv
+        import io
+
+        if not filename.endswith(".csv") or len(data) > 2_000_000:
+            raise ValueError("Expected a CSV of at most 2 MB.")
+        rows = csv.reader(io.StringIO(data.decode("utf-8-sig")))
+        header = next(rows, [])
+        if not 1 <= len(header) <= 100:
+            raise ValueError("Invalid CSV width.")
+        for i, row in enumerate(rows):
+            if i >= 20000 or len(row) != len(header):
+                raise ValueError("Invalid CSV dimensions.")
+        path = folder / "data.csv"
+        path.write_bytes(data)
+        return path
+    if len(data) > 1_000_000:
+        raise ValueError("Crystal input is too large.")
+    contents = data.decode("utf-8-sig")
+    if filename.endswith(".cif"):
+        structure = Structure.from_str(contents, fmt="cif")
+    else:
+        structure = Poscar.from_str(contents).structure
+    if not structure.is_ordered or not 1 <= len(structure) <= 128:
+        raise ValueError("Expected an ordered crystal with at most 128 sites.")
+    path = folder / "POSCAR"
+    Poscar(structure).write_file(path)
+    return path
