@@ -22,6 +22,7 @@ COPY src ./src
 COPY streamlit_app/core ./streamlit_app/core
 COPY streamlit_app/assets/structures ./streamlit_app/assets/structures
 COPY streamlit_app/assets/neb ./streamlit_app/assets/neb
+COPY streamlit_app/assets/ml ./streamlit_app/assets/ml
 COPY web/server.py ./web/
 COPY --from=frontend /frontend/dist ./web/dist
 USER masgent
