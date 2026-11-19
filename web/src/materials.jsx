@@ -35,12 +35,13 @@ function family(symbol, row) {
   return Object.keys(families).find(name => families[name].split(' ').includes(symbol)) || 'Transition metal';
 }
 
-export function MaterialsExplorer({ api, onError }) {
+export function MaterialsExplorer({ api, onError, useMaterial }) {
   const [entries, setEntries] = useState([]);
   const [selected, setSelected] = useState([]);
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [source, setSource] = useState('bundled');
   useEffect(() => {
     let current = true;
     api('/structures').then(items => {
@@ -62,7 +63,11 @@ export function MaterialsExplorer({ api, onError }) {
     </header>
     <section className="panel elements-panel" aria-label="Periodic table">
       <div className="explorer-toolbar">
-        <label>Search examples<input type="search" placeholder="Formula or material name" value={query}
+        <label>Catalog<select value={source} onChange={event => { setSource(event.target.value); setQuery(''); }}>
+          <option value="bundled">Bundled examples</option>
+          <option value="mp">Materials Project</option>
+        </select></label>
+        <label>Search<input type="search" placeholder={source === 'mp' ? 'Formula or material ID' : 'Formula or material name'} value={query}
           onChange={event => setQuery(event.target.value)} /></label>
         <button className="secondary clear-filters" disabled={!query && !selected.length}
           onClick={() => { setSelected([]); setQuery(''); }}>Clear filters</button>
@@ -85,6 +90,7 @@ export function MaterialsExplorer({ api, onError }) {
           aria-label={'Remove ' + elements[symbol].name}>{symbol} ×</button>)}
       </div>}
     </section>
+    {source === 'mp' ? <MaterialsProject api={api} onError={onError} query={query} selected={selected} useMaterial={useMaterial} /> :
     <div className="materials-layout">
       <section className="panel material-list">
         <h2>Matching structures <span className="count">{matching.length}</span></h2>
@@ -96,8 +102,65 @@ export function MaterialsExplorer({ api, onError }) {
         </button>)}
       </section>
       {chosen && <CrystalPreview key={chosen.index} endpoint={'/structures/' + chosen.index} api={api} onError={onError} />}
-    </div>
+    </div>}
   </>;
+}
+
+function MaterialsProject({ api, onError, query, selected, useMaterial }) {
+  const [request, setRequest] = useState(null);
+  const [response, setResponse] = useState(null);
+  const [chosen, setChosen] = useState('');
+  const [status, setStatus] = useState(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    api('/materials-project/status').then(data => setStatus(data.configured)).catch(onError);
+  }, []);
+  useEffect(() => {
+    if (!request) return;
+    let active = true;
+    const params = new URLSearchParams(request);
+    api('/materials-project/search?' + params).then(data => {
+      if (!active) return;
+      setResponse(data);
+      setChosen(data.items[0]?.material_id || '');
+    }).catch(error => {
+      if (!active) return;
+      if (error.status === 401) onError(error);
+      else setError(error.message);
+    });
+    return () => { active = false; };
+  }, [request]);
+
+  function search(page, newSearch = false) {
+    setError('');
+    setResponse(null);
+    setChosen('');
+    setRequest(newSearch ? { query: query.trim(), elements: selected.join(','), page } : { ...request, page });
+  }
+
+  return <div className="materials-layout">
+    <section className="panel material-list">
+      <h2>Materials Project</h2>
+      {status === false && <p>Add a Materials Project API key in the server configuration to search the online catalog.</p>}
+      {status === true && <button className="primary" disabled={!query.trim() && !selected.length}
+        onClick={() => search(0, true)}>Search catalog</button>}
+      {request && !response && !error && <p role="status">Searching Materials Project…</p>}
+      {error && <p className="error" role="alert">{error}</p>}
+      {response && <p>{response.total.toLocaleString()} matches</p>}
+      {response?.items.map(item => <button key={item.material_id} className="material-row"
+        aria-pressed={item.material_id === chosen} onClick={() => setChosen(item.material_id)}>
+        <strong>{item.formula_pretty}</strong><span>{item.material_id}</span>
+      </button>)}
+      {chosen && <button className="secondary use-material" onClick={() => useMaterial(chosen)}>Use {chosen} as simulation input</button>}
+      {response && <div className="viewer-toolbar">
+        <button type="button" disabled={request.page === 0} onClick={() => search(request.page - 1)}>Previous</button>
+        <button type="button" disabled={(request.page + 1) * 25 >= response.total || request.page >= 10000}
+          onClick={() => search(request.page + 1)}>Next</button>
+      </div>}
+    </section>
+    {chosen && <CrystalPreview key={chosen} endpoint={'/materials-project/structure/' + encodeURIComponent(chosen)}
+      api={api} onError={onError} />}
+  </div>;
 }
 
 export function CrystalPreview({ endpoint, api, onError }) {
