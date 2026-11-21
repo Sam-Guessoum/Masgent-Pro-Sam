@@ -117,6 +117,7 @@ function Workspace({ signOut, sessionEnded, globalError }) {
       const result = await api('/runs', { tool: toolId, params });
       setRun(null);
       setRunId(result.run_id);
+      setMode('results');
     } catch (error) {
       reportError(error);
     }
@@ -129,15 +130,16 @@ function Workspace({ signOut, sessionEnded, globalError }) {
     <aside>
       <Brand />
       <nav aria-label="Workspace">
-        <button className="nav-button explorer-nav" aria-current={mode === 'explorer' ? 'page' : undefined}
+        <button className="nav-button" aria-current={mode === 'explorer' ? 'page' : undefined}
           onClick={() => setMode('explorer')}>Materials explorer</button>
-        {groups.map(group => <section key={group}>
-        <h2>{group}</h2>
-        {catalog.tools.filter(item => item.group === group).map(item =>
-          <button key={item.id} className="nav-button" aria-current={mode === 'tools' && item.id === toolId ? 'page' : undefined}
-            onClick={() => { setToolId(item.id); setMode('tools'); }}>{item.title}</button>
-        )}
-      </section>)}</nav>
+        {groups.map(group => <button key={group} className="nav-button"
+          aria-current={mode === 'tools' && tool?.group === group ? 'page' : undefined}
+          onClick={() => { if (tool?.group !== group) setToolId(catalog.tools.find(item => item.group === group).id); setMode('tools'); }}>
+          {group}
+        </button>)}
+        <button className="nav-button" aria-current={mode === 'results' ? 'page' : undefined}
+          onClick={() => setMode('results')}>Results library</button>
+      </nav>
       <button className="secondary" onClick={signOut}>Sign out</button>
     </aside>
     <main className="workspace">
@@ -145,10 +147,14 @@ function Workspace({ signOut, sessionEnded, globalError }) {
       {mode === 'explorer' && <MaterialsExplorer api={api} onError={reportError} useMaterial={id => { setMaterial(id); setMode('tools'); }} />}
       {mode === 'tools' && tool && <>
         <header><p className="group">{tool.group}</p><h1>{tool.title}</h1><p>{tool.description}</p></header>
+        <div className="workflow-tabs" role="group" aria-label={tool.group + ' workflows'}>
+          {catalog.tools.filter(item => item.group === tool.group).map(item => <button key={item.id}
+            aria-pressed={item.id === toolId} onClick={() => setToolId(item.id)}>{item.title}</button>)}
+        </div>
         {tool.unavailable ? <p className="panel">{tool.unavailable}</p> :
           <ToolForm key={tool.id} tool={tool} examples={catalog.examples} material={material} submit={submit} />}
       </>}
-      {mode === 'tools' && <section className="panel runs" aria-label="Results library">
+      {mode === 'results' && <section className="panel runs" aria-label="Results library">
         <h2>Results library</h2>
         {runs.length ? <ul>{runs.map(item => <li key={item.run_id}>
           <button className="run-row" aria-pressed={runId === item.run_id} onClick={() => {
@@ -178,7 +184,7 @@ function Workspace({ signOut, sessionEnded, globalError }) {
 
 function ToolForm({ tool, examples, material, submit }) {
   const [values, setValues] = useState(() => Object.fromEntries(tool.fields.map(field => [
-    field.name, field.kind === 'structure' ? (material ? 'mp:' + material : examples[0] || '') : field.default ?? '',
+    field.name, field.kind === 'structure' ? (material ? material : examples[0] || '') : field.default ?? '',
   ])));
   const [busy, setBusy] = useState(false);
   const [uploads, setUploads] = useState({});
@@ -216,14 +222,14 @@ function ToolForm({ tool, examples, material, submit }) {
   return <form className="panel tool-form" onSubmit={run}>
     <div className="fields">{fields.map(field => {
       const value = values[field.name];
-      const options = field.kind === 'structure' ? (material ? ['mp:' + material, ...examples] : examples) : field.options;
+      const options = field.kind === 'structure' ? (material ? [material, ...examples] : examples) : field.options;
       let control;
       if (field.kind === 'folder') {
         control = null;
       } else if (options) {
         control = <select value={value} required={!uploads[field.name]} disabled={Boolean(uploads[field.name])} onChange={event => set(field.name, event.target.value)}>
           <option value="" disabled>Choose an option</option>
-          {options.map(option => <option key={option} value={option}>{option.startsWith('mp:') ? option.slice(3) + ' · Materials Project' : option}</option>)}
+          {options.map(option => <option key={option} value={option}>{option === material ? option.slice(option.indexOf(':') + 1) + ' · Imported crystal' : option}</option>)}
         </select>;
       } else if (field.type === 'bool') {
         control = <input type="checkbox" checked={Boolean(value)} onChange={event => set(field.name, event.target.checked)} />;
