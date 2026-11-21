@@ -8,6 +8,7 @@ import os
 import re
 import sys
 from zipfile import BadZipFile
+from urllib.parse import parse_qs, urlsplit
 from contextlib import ExitStack
 from datetime import timedelta
 from pathlib import Path
@@ -211,11 +212,14 @@ def create_app():
                     except (ValueError, TypeError, OSError, BadZipFile, UnsafePathError):
                         return {"error": f"Could not read the file supplied for {spec.ui.label or name}."}, 422
                     continue
-                if not isinstance(value, str) or not value.startswith("mp:"):
+                if not isinstance(value, str):
+                    continue
+                provider, _, entry = value.partition(":")
+                if provider != "mp" and provider not in PUBLIC_CATALOGS:
                     continue
                 from pymatgen.io.vasp import Poscar
 
-                structure, error = mp_structure(value[3:])
+                structure, error = mp_structure(entry) if provider == "mp" else public_structure(provider, entry)
                 if error:
                     return error
                 if not structure.is_ordered or len(structure) > 128:
@@ -285,6 +289,58 @@ def create_app():
             return run_data(path)
         except (ValueError, OSError, csv.Error):
             return {"error": "Could not read the calculation data."}, 422
+
+    @app.get("/api/catalogs/<provider>/search")
+    def public_search(provider):
+        from pymatgen.core import Composition, Element
+
+        if provider not in PUBLIC_CATALOGS:
+            abort(404)
+        query = request.args.get("query", "").strip()
+        symbols = request.args.get("elements", "").split(",") if request.args.get("elements") else []
+        page = request.args.get("page", default=0, type=int)
+        cursor = request.args.get("cursor", "")
+        if (not 0 <= page <= 10000 or len(symbols) > 18
+                or any(not Element.is_valid_symbol(symbol) for symbol in symbols)
+                or (query and not PUBLIC_ID.fullmatch(query)) or (cursor and not PUBLIC_ID.fullmatch(cursor))):
+            abort(400)
+        filters = []
+        if query:
+            if ":" not in query and "-" not in query and not query.isdigit():
+                try:
+                    comp = Composition(query, strict=True).reduced_composition
+                    aflow = provider == "aflow"
+                    formula = "".join(symbol + (f"{amount:g}" if aflow or amount != 1 else "")
+                                      for symbol, amount in sorted(comp.get_el_amt_dict().items()))
+                    property_name = "chemical_formula_descriptive" if aflow else "chemical_formula_reduced"
+                    filters.append(f'{property_name}="{formula}"')
+                except (ValueError, TypeError):
+                    filters.append(f'id="{query}"')
+            else:
+                filters.append(f'id="{query}"')
+        if symbols:
+            filters.append("elements HAS ALL " + ",".join(f'"{symbol}"' for symbol in symbols))
+        if not filters:
+            return {"error": "Enter a formula, record ID, or select an element."}, 400
+        data, error = optimade_query(provider, " AND ".join(filters), 25, page * 25, cursor)
+        if error:
+            return error
+        items = [{"material_id": doc["id"], "formula_pretty": doc["attributes"].get("chemical_formula_reduced") or doc["id"]}
+                 for doc in data["data"]]
+        meta = data.get("meta") or {}
+        next_link = (data.get("links") or {}).get("next")
+        if isinstance(next_link, dict):
+            next_link = next_link.get("href")
+        paging = parse_qs(urlsplit(next_link).query) if isinstance(next_link, str) else {}
+        return {"items": items, "more": bool(next_link or meta.get("more_data_available")),
+                "cursor": paging.get("page_after", [""])[0]}
+
+    @app.get("/api/catalogs/<provider>/structure")
+    def public_preview(provider):
+        if provider not in PUBLIC_CATALOGS:
+            abort(404)
+        structure, error = public_structure(provider, request.args.get("id", ""))
+        return error or geometry_payload(structure)
 
     @app.get("/api/materials-project/status")
     def materials_project_status():
@@ -373,6 +429,10 @@ def validated_value(field, value, example_names, options):
         return f"example:{value}"
     if kind == "structure" and isinstance(value, str) and value.startswith("mp:") and MP_ID.fullmatch(value[3:]):
         return value
+    if kind == "structure" and isinstance(value, str):
+        provider, _, entry = value.partition(":")
+        if provider in PUBLIC_CATALOGS and PUBLIC_ID.fullmatch(entry):
+            return value
     if kind == "matrix3" and isinstance(value, str) and re.fullmatch(r"[1-4] 0 0; 0 [1-4] 0; 0 0 [1-4]", value):
         return value
     if kind == "miller" and isinstance(value, list) and len(value) == 3:
@@ -552,3 +612,61 @@ def numeric_cell(cell):
     except ValueError:
         pass
     return cell[:160]
+
+
+PUBLIC_CATALOGS = {
+    "oqmd": "https://oqmd.org/optimade/v1",
+    "aflow": "https://aflow.org/API/optimade/v1",
+    "alexandria": "https://alexandria.icams.rub.de/pbe/v1",
+    "nomad": "https://nomad-lab.eu/prod/v1/optimade/v1",
+}
+PUBLIC_ID = re.compile(r"[A-Za-z0-9_.:+-]{1,180}")
+
+
+def optimade_query(provider, filter_expression, limit, offset=0, cursor=""):
+    params = {"filter": filter_expression, "page_limit": limit}
+    if cursor:
+        params["page_after"] = cursor
+    elif offset:
+        params["page_offset"] = offset
+    if limit > 1:
+        params["response_fields"] = "chemical_formula_reduced"
+    try:
+        response = requests.get(PUBLIC_CATALOGS[provider] + "/structures", params=params,
+                                timeout=(4, 15), allow_redirects=False)
+        if response.status_code != 200:
+            raise ValueError("Provider returned an unsuccessful response.")
+        data = response.json()
+        if not isinstance(data.get("data"), list):
+            raise ValueError("Malformed provider response.")
+        return data, None
+    except (requests.RequestException, ValueError, AttributeError):
+        return None, ({"error": "This catalog could not complete the query. Try again or choose another source."}, 502)
+
+
+def public_structure(provider, entry):
+    from pymatgen.core import Structure
+
+    if not PUBLIC_ID.fullmatch(entry):
+        return None, ({"error": "Invalid catalog record ID."}, 400)
+    data, error = optimade_query(provider, f'id="{entry}"', 1)
+    if error:
+        return None, error
+    if not data["data"]:
+        return None, ({"error": "This catalog record was not found."}, 404)
+    try:
+        attributes = data["data"][0]["attributes"]
+        lattice = attributes["lattice_vectors"]
+        positions = attributes["cartesian_site_positions"]
+        names = attributes["species_at_sites"]
+        if not 0 < len(positions) <= 4000 or len(positions) != len(names):
+            raise ValueError("Unsupported site count.")
+        species = {item["name"]: {element: concentration for element, concentration in
+                                  zip(item["chemical_symbols"], item["concentration"])
+                                  if element != "vacancy" and concentration > 0}
+                   for item in (attributes.get("species") or [])}
+        occupancies = [species.get(name, name) for name in names]
+        structure = Structure(lattice, occupancies, positions, coords_are_cartesian=True)
+        return structure, None
+    except (AttributeError, KeyError, TypeError, ValueError, IndexError):
+        return None, ({"error": "This record has no supported periodic crystal geometry."}, 422)
