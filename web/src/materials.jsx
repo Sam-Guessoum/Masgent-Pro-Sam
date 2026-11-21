@@ -35,6 +35,16 @@ function family(symbol, row) {
   return Object.keys(families).find(name => families[name].split(' ').includes(symbol)) || 'Transition metal';
 }
 
+const catalogs = {
+  bundled: 'Example crystals', mp: 'Materials Project', oqmd: 'OQMD',
+  aflow: 'AFLOW', alexandria: 'Alexandria PBE', nomad: 'NOMAD',
+};
+const catalogLinks = {
+  mp: 'https://next-gen.materialsproject.org/', oqmd: 'https://oqmd.org/materials/',
+  aflow: 'https://www.aflowlib.org/', alexandria: 'https://alexandria.icams.rub.de/datasets.html',
+  nomad: 'https://nomad-lab.eu/select-gui?destination=home',
+};
+
 export function MaterialsExplorer({ api, onError, useMaterial }) {
   const [entries, setEntries] = useState([]);
   const [selected, setSelected] = useState([]);
@@ -59,15 +69,14 @@ export function MaterialsExplorer({ api, onError, useMaterial }) {
 
   return <>
     <header className="explorer-heading"><h1>Materials explorer</h1>
-      <p>Filter the bundled crystal structures by element and inspect their unit cells in 3D.</p>
+      <p>Search crystal databases, inspect structures in 3D, and carry your selection into a calculation.</p>
     </header>
     <section className="panel elements-panel" aria-label="Periodic table">
       <div className="explorer-toolbar">
         <label>Catalog<select value={source} onChange={event => { setSource(event.target.value); setQuery(''); }}>
-          <option value="bundled">Bundled examples</option>
-          <option value="mp">Materials Project</option>
+          {Object.entries(catalogs).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
         </select></label>
-        <label>Search<input type="search" placeholder={source === 'mp' ? 'Formula or material ID' : 'Formula or material name'} value={query}
+        <label>Search<input type="search" placeholder={source !== 'bundled' ? 'Formula or record ID' : 'Formula or material name'} value={query}
           onChange={event => setQuery(event.target.value)} /></label>
         <button className="secondary clear-filters" disabled={!query && !selected.length}
           onClick={() => { setSelected([]); setQuery(''); }}>Clear filters</button>
@@ -90,7 +99,7 @@ export function MaterialsExplorer({ api, onError, useMaterial }) {
           aria-label={'Remove ' + elements[symbol].name}>{symbol} ×</button>)}
       </div>}
     </section>
-    {source === 'mp' ? <MaterialsProject api={api} onError={onError} query={query} selected={selected} useMaterial={useMaterial} /> :
+    {source !== 'bundled' ? <OnlineCatalog key={source} source={source} api={api} onError={onError} query={query} selected={selected} useMaterial={useMaterial} /> :
     <div className="materials-layout">
       <section className="panel material-list">
         <h2>Matching structures <span className="count">{matching.length}</span></h2>
@@ -106,22 +115,26 @@ export function MaterialsExplorer({ api, onError, useMaterial }) {
   </>;
 }
 
-function MaterialsProject({ api, onError, query, selected, useMaterial }) {
+function OnlineCatalog({ source, api, onError, query, selected, useMaterial }) {
   const [request, setRequest] = useState(null);
   const [response, setResponse] = useState(null);
   const [chosen, setChosen] = useState('');
-  const [status, setStatus] = useState(null);
+  const [cursors, setCursors] = useState({});
+  const [status, setStatus] = useState(source === 'mp' ? null : true);
   const [error, setError] = useState('');
+  const root = source === 'mp' ? '/materials-project' : '/catalogs/' + source;
   useEffect(() => {
+    if (source !== 'mp') return;
     api('/materials-project/status').then(data => setStatus(data.configured)).catch(onError);
   }, []);
   useEffect(() => {
     if (!request) return;
     let active = true;
     const params = new URLSearchParams(request);
-    api('/materials-project/search?' + params).then(data => {
+    api(root + '/search?' + params).then(data => {
       if (!active) return;
       setResponse(data);
+      if (data.cursor) setCursors(current => ({ ...current, [request.page + 1]: data.cursor }));
       setChosen(data.items[0]?.material_id || '');
     }).catch(error => {
       if (!active) return;
@@ -133,32 +146,35 @@ function MaterialsProject({ api, onError, query, selected, useMaterial }) {
 
   function search(page, newSearch = false) {
     setError('');
+    if (newSearch) setCursors({});
     setResponse(null);
     setChosen('');
-    setRequest(newSearch ? { query: query.trim(), elements: selected.join(','), page } : { ...request, page });
+    setRequest(newSearch ? { query: query.trim(), elements: selected.join(','), page, cursor: '' } :
+      { ...request, page, cursor: cursors[page] || '' });
   }
 
   return <div className="materials-layout">
     <section className="panel material-list">
-      <h2>Materials Project</h2>
+      <h2>{catalogs[source]}</h2>
+      <a className="catalog-source" href={catalogLinks[source]} target="_blank" rel="noreferrer">Source and citation ↗</a>
       {status === false && <p>Add a Materials Project API key in the server configuration to search the online catalog.</p>}
       {status === true && <button className="primary" disabled={!query.trim() && !selected.length}
         onClick={() => search(0, true)}>Search catalog</button>}
-      {request && !response && !error && <p role="status">Searching Materials Project…</p>}
+      {request && !response && !error && <p role="status">Searching {catalogs[source]}…</p>}
       {error && <p className="error" role="alert">{error}</p>}
-      {response && <p>{response.total.toLocaleString()} matches</p>}
+      {response && <p>{Number.isFinite(response.total) ? response.total.toLocaleString() + ' matches' : `Page ${request.page + 1} · ${response.items.length} records`}</p>}
       {response?.items.map(item => <button key={item.material_id} className="material-row"
         aria-pressed={item.material_id === chosen} onClick={() => setChosen(item.material_id)}>
         <strong>{item.formula_pretty}</strong><span>{item.material_id}</span>
       </button>)}
-      {chosen && <button className="secondary use-material" onClick={() => useMaterial(chosen)}>Use {chosen} as simulation input</button>}
+      {chosen && <button className="secondary use-material" onClick={() => useMaterial(source + ':' + chosen)}>Use {chosen} as simulation input</button>}
       {response && <div className="viewer-toolbar">
         <button type="button" disabled={request.page === 0} onClick={() => search(request.page - 1)}>Previous</button>
-        <button type="button" disabled={(request.page + 1) * 25 >= response.total || request.page >= 10000}
+        <button type="button" disabled={(typeof response.more === 'boolean' ? !response.more : (request.page + 1) * 25 >= response.total) || request.page >= 10000}
           onClick={() => search(request.page + 1)}>Next</button>
       </div>}
     </section>
-    {chosen && <CrystalPreview key={chosen} endpoint={'/materials-project/structure/' + encodeURIComponent(chosen)}
+    {chosen && <CrystalPreview key={chosen} endpoint={root + '/structure' + (source === 'mp' ? '/' : '?id=') + encodeURIComponent(chosen)}
       api={api} onError={onError} />}
   </div>;
 }
@@ -202,6 +218,7 @@ function CrystalCanvas({ structure }) {
   const ref = useRef(null);
   const drag = useRef(null);
   const [view, setView] = useState(initialView);
+  const [showCell, setShowCell] = useState(true);
   const zoom = multiplier => setView(current => ({ ...current, zoom: Math.max(.35, Math.min(4, current.zoom * multiplier)) }));
 
   useEffect(() => {
@@ -229,7 +246,7 @@ function CrystalCanvas({ structure }) {
       };
       const projected = corners.map(project);
       const atoms = structure.sites.map(site => ({ ...site, screen: project(site.position) }));
-      const lines = edges.map(([a, b]) => ({ a: projected[a], b: projected[b] }));
+      const lines = (showCell ? edges : []).map(([a, b]) => ({ a: projected[a], b: projected[b] }));
       const draw = [
         ...lines.map(line => ({ depth: (line.a[2] + line.b[2]) / 2, line })),
         ...atoms.map(atom => ({ depth: atom.screen[2], atom })),
@@ -249,10 +266,13 @@ function CrystalCanvas({ structure }) {
           const light = context.createRadialGradient(x - size * .28, y - size * .35, 0, x, y, size);
           light.addColorStop(0, '#f3f8ff');
           light.addColorStop(.48, atomColor(element));
-          light.addColorStop(1, '#172946');
+          light.addColorStop(1, atomColor(element));
+          context.strokeStyle = '#344156';
+          context.lineWidth = .7;
           context.fillStyle = light;
           context.arc(x, y, size, 0, Math.PI * 2);
           context.fill();
+          context.stroke();
         }
       }
     };
@@ -260,7 +280,7 @@ function CrystalCanvas({ structure }) {
     observer.observe(canvas);
     redraw();
     return () => observer.disconnect();
-  }, [structure, view]);
+  }, [structure, view, showCell]);
 
   return <>
     <div className="crystal-stage">
@@ -286,6 +306,7 @@ function CrystalCanvas({ structure }) {
       <span>Drag or use arrow keys to rotate</span>
       <button type="button" aria-label="Zoom in" onClick={() => zoom(1.2)}>+</button>
       <button type="button" aria-label="Zoom out" onClick={() => zoom(1 / 1.2)}>−</button>
+      <button type="button" aria-pressed={showCell} onClick={() => setShowCell(!showCell)}>Unit cell</button>
       <button type="button" onClick={() => setView(initialView)}>Reset view</button>
     </div>
   </>;
