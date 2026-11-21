@@ -8,7 +8,7 @@ import os
 import re
 import sys
 from zipfile import BadZipFile
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 from contextlib import ExitStack
 from datetime import timedelta
 from pathlib import Path
@@ -322,6 +322,8 @@ def create_app():
             filters.append("elements HAS ALL " + ",".join(f'"{symbol}"' for symbol in symbols))
         if not filters:
             return {"error": "Enter a formula, record ID, or select an element."}, 400
+        if provider == "nomad":
+            filters.append("nperiodic_dimensions=3")
         data, error = optimade_query(provider, " AND ".join(filters), 25, page * 25, cursor)
         if error:
             return error
@@ -647,15 +649,20 @@ def optimade_query(provider, filter_expression, limit, offset=0, cursor=""):
 def public_structure(provider, entry):
     from pymatgen.core import Structure
 
-    if not PUBLIC_ID.fullmatch(entry):
+    if entry in {".", ".."} or not PUBLIC_ID.fullmatch(entry):
         return None, ({"error": "Invalid catalog record ID."}, 400)
-    data, error = optimade_query(provider, f'id="{entry}"', 1)
-    if error:
-        return None, error
-    if not data["data"]:
-        return None, ({"error": "This catalog record was not found."}, 404)
     try:
-        attributes = data["data"][0]["attributes"]
+        response = requests.get(PUBLIC_CATALOGS[provider] + "/structures/" + quote(entry, safe=":"),
+                                timeout=(4, 15), allow_redirects=False)
+        if response.status_code == 404:
+            return None, ({"error": "This catalog record was not found."}, 404)
+        if response.status_code != 200:
+            raise ValueError("Provider returned an unsuccessful response.")
+        record = response.json()["data"]
+    except (requests.RequestException, ValueError, KeyError):
+        return None, ({"error": "This catalog could not load the requested crystal."}, 502)
+    try:
+        attributes = record["attributes"]
         lattice = attributes["lattice_vectors"]
         positions = attributes["cartesian_site_positions"]
         names = attributes["species_at_sites"]
