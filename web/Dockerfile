@@ -8,13 +8,13 @@ RUN npm run build
 
 FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 MPLBACKEND=Agg MASGENT_WEB_DATA=/data OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1
-ARG INSTALL_CHGNET=0
+ARG INSTALL_CHGNET=1
 WORKDIR /app
-COPY web/requirements.txt ./web/
+COPY web/requirements*.txt ./web/
 RUN pip install --no-cache-dir -r web/requirements.txt \
     && if [ "$INSTALL_CHGNET" = "1" ]; then \
          pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu \
-         && pip install --no-cache-dir chgnet; \
+         && pip install --no-cache-dir -r web/requirements-mlp.txt; \
        fi \
     && useradd --create-home --uid 10001 masgent \
     && mkdir /data && chown masgent:masgent /data

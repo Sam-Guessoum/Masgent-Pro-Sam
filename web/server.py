@@ -32,6 +32,7 @@ from core.settings import get_secret, load_settings
 from core.paths import UnsafePathError
 
 MLP_TOOL = "run_simulation_using_mlps"
+MLP_STEP_LIMIT = 2000
 MLP_PACKAGES = {"CHGNet": "chgnet", "SevenNet": "sevenn", "Orb-v3": "orb_models", "MatterSim": "mattersim"}
 TOOLS = (
     "convert_structure_format",
@@ -81,14 +82,14 @@ def create_app():
     storage = Storage(os.environ.get("MASGENT_WEB_DATA", "masgent_projects/web"))
     manager = RunManager(storage, max_concurrent=1, warm_spares=0)
     examples_list = [name for name in examples.STRUCTURES if examples.structure_path(name)]
-    model_options = [name for name, package in MLP_PACKAGES.items() if find_spec(package)]
+    model_options = [name for name, package in MLP_PACKAGES.items() if find_spec("torch") and find_spec(package)]
     fields_by_tool = {tool: [f for f in form_fields(tool) if f.name != "input_format"]
                       for tool in (*TOOLS, MLP_TOOL)}
 
     def unavailable_reason(tool):
         ui, _ = get_tool(tool)
         if tool == MLP_TOOL and not model_options:
-            return "No ML-potential engine is installed on this server."
+            return "No ML-potential engine is installed. Deploy the Masgent server with CPU PyTorch and CHGNet enabled."
         if tool == "generate_vasp_poscar" and not get_secret("MP_API_KEY"):
             return "Add MP_API_KEY in the host environment to enable this tool."
         if "PSP" in ui.needs:
@@ -105,6 +106,13 @@ def create_app():
         if field.name == "vasp_input_sets":
             return ["MPMetalRelaxSet", "MPRelaxSet", "MPStaticSet", "MPNonSCFBandSet", "MPNonSCFDOSSet", "MPMDSet"]
         return field.ui.options or field.spec.literal_options
+
+    def field_bounds(tool, field):
+        if tool == MLP_TOOL and field.name in {"max_steps", "md_steps"}:
+            return 1, MLP_STEP_LIMIT
+        if tool == MLP_TOOL and field.name == "temperature":
+            return 1, field.ui.max
+        return field.ui.min, field.ui.max
 
     def field_default(field):
         if field.name == "mlps_type" and model_options and field.default() not in model_options:
@@ -167,8 +175,8 @@ def create_app():
             tools.append(dict(id=tool, title=ui.title, group=PAGES[ui.page][0], description=ui.summary,
                               unavailable=unavailable_reason(tool), fields=[
                 dict(name=f.name, label=f.ui.label or f.name, kind=f.ui.kind, type=f.spec.base_type,
-                     default=field_default(f), options=field_options(f),
-                     min=f.ui.min, max=f.ui.max, required=f.spec.required)
+                     default=field_default(f), options=field_options(f), labels=f.ui.option_labels,
+                     min=field_bounds(tool, f)[0], max=field_bounds(tool, f)[1], required=f.spec.required)
                 for f in fields
             ]))
         return {"tools": tools, "examples": examples_list}
@@ -197,9 +205,9 @@ def create_app():
                 continue
             value = raw.get(field.name, field_default(field))
             try:
-                params[field.name] = validated_value(field, value, examples_list, field_options(field))
-                if tool == MLP_TOOL and field.name in {"max_steps", "md_steps"} and params[field.name] > 2000:
-                    raise ValueError(field.name)
+                params[field.name] = validated_value(
+                    field, value, examples_list, field_options(field), field_bounds(tool, field)
+                )
             except ValueError:
                 return {"error": f"Check {field.ui.label or field.name}."}, 400
         with ExitStack() as inputs:
@@ -398,7 +406,7 @@ def create_app():
     def result_structure(run_id, name):
         path = result_path(run_id, name)
         suffix = path.suffix.lower()
-        if path.name.upper() in {"POSCAR", "CONTCAR"} or suffix in {".vasp", ".poscar"}:
+        if re.fullmatch(r"(?:POSCAR|CONTCAR)(?:_.+)?", path.name, re.IGNORECASE) or suffix in {".vasp", ".poscar"}:
             return crystal_geometry(path, "poscar")
         if suffix == ".cif":
             return crystal_geometry(path, "cif")
@@ -415,7 +423,7 @@ def create_app():
     return app
 
 
-def validated_value(field, value, example_names, options):
+def validated_value(field, value, example_names, options, bounds):
     kind = field.ui.kind
     if kind in {"structure", "folder", "csv"} and isinstance(value, dict):
         if isinstance(value.get("upload"), str) and isinstance(value.get("filename"), str):
@@ -447,11 +455,12 @@ def validated_value(field, value, example_names, options):
     if field.spec.base_type == "bool" and type(value) is bool:
         return value
     if kind == "list_float" and isinstance(value, list) and 4 <= len(value) <= 15:
-        if all(type(n) in (float, int) and .7 <= n <= 1.3 for n in value) and len(set(value)) == len(value):
+        if all(type(n) in (float, int) and .7 <= n <= 1.3 for n in value) and len({f"{n:.3f}" for n in value}) == len(value):
             return value
     if type(value) in (float, int) and field.spec.base_type in {"int", "float", "number"}:
-        low = field.ui.min if field.ui.min is not None else 0
-        high = field.ui.max if field.ui.max is not None else 100
+        low, high = bounds
+        low = 0 if low is None else low
+        high = 100 if high is None else high
         if math.isfinite(value) and low <= value <= high and (field.spec.base_type != "int" or type(value) is int):
             return value
     raise ValueError(field.name)

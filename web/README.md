@@ -1,8 +1,6 @@
 # Masgent React workspace
 
-This first migration covers file format conversion, POSCAR coordinate conversion, supercells, vacancies, substitutions, interstitials, surface slabs and KPOINTS generation from bundled POSCAR examples. The results library shows run status and downloads. The production web app runs these tools using the existing Python job manager.
-
-The Streamlit application still provides uploads, the AI assistant, ML tools and potentials, advanced VASP workflows, interfaces, SQS, project management and 3D visualization.
+The React workspace browses materials databases, prepares crystal structures and VASP inputs, and runs ML potential simulations through the Python job manager. The Results Library shows run status, plots, structures and downloadable files.
 
 ## Run locally
 
@@ -28,4 +26,6 @@ The GitHub repository stores the source. An HTTPS container host runs the server
 
 Set `MP_API_KEY` as a host secret to enable the authenticated Materials Project catalog. Browse by formula, material ID, or periodic-table elements. Result pages fetch crystal coordinates on demand.
 
-Use `docker build --build-arg INSTALL_CHGNET=1 -f web/Dockerfile -t masgent-web-mlp .` to add CHGNet and CPU PyTorch. The run form offers the engines installed on the host. Other engines require their corresponding Python packages and model weights. Validate memory and runtime limits before enabling them on a shared host. PNG plots produced by successful runs can be viewed in Results Library.
+The default container includes CHGNet and CPU PyTorch. To run CHGNet locally, install CPU PyTorch with `python -m pip install torch --index-url https://download.pytorch.org/whl/cpu`, then install the model with `python -m pip install -r web/requirements-mlp.txt`. A container built with `--build-arg INSTALL_CHGNET=0` omits the engine. Other engines require their corresponding Python packages and model weights.
+
+To verify the setup, open **ML potentials**, choose the bundled **fcc Al (mp-134)** structure, select **CHGNet** and **Geometry relaxation**, and run the job. The Results Library shows the energy, optimization history, and the relaxed crystal. The same tab supports equation of state, elastic constants, and molecular dynamics.

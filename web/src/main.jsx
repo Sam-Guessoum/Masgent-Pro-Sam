@@ -123,6 +123,7 @@ function Workspace({ signOut, sessionEnded, globalError }) {
     }
   }
 
+  const simulationTool = catalog?.tools.find(item => item.id === 'run_simulation_using_mlps');
   const tool = catalog?.tools.find(item => item.id === toolId);
   const groups = [...new Set(catalog?.tools.map(item => item.group))];
 
@@ -144,7 +145,11 @@ function Workspace({ signOut, sessionEnded, globalError }) {
     </aside>
     <main className="workspace">
       {(error || globalError) && <p className="error" role="alert">{error || globalError}</p>}
-      {mode === 'explorer' && <MaterialsExplorer api={api} onError={reportError} useMaterial={id => { setMaterial(id); setMode('tools'); }} />}
+      {mode === 'explorer' && <MaterialsExplorer api={api} onError={reportError} useMaterial={id => {
+        setMaterial(id);
+        if (simulationTool && !simulationTool.unavailable) setToolId(simulationTool.id);
+        setMode('tools');
+      }} />}
       {mode === 'tools' && tool && <>
         <header><p className="group">{tool.group}</p><h1>{tool.title}</h1><p>{tool.description}</p></header>
         <div className="workflow-tabs" role="group" aria-label={tool.group + ' workflows'}>
@@ -169,7 +174,7 @@ function Workspace({ signOut, sessionEnded, globalError }) {
           {!['queued', 'running'].includes(run.status) && <CalculationResults key={runId} run={run} api={api} onError={reportError} />}
           {run.files.length > 0 && <ul aria-label="Output files">{run.files.map(file => {
             const path = file.split('/').map(encodeURIComponent).join('/');
-            const canPreview = /(?:^|\/)(?:POSCAR|CONTCAR)$|\.(?:vasp|poscar|cif)$/i.test(file);
+            const canPreview = /(?:^|\/)(?:POSCAR|CONTCAR)(?:_[^/]+)?$|\.(?:vasp|poscar|cif)$/i.test(file);
             return <li key={file} className="result-file">
               <a href={`/api/runs/${runId}/files/${path}`}>{file}</a>
               {canPreview && <button className="secondary" onClick={() => setPreview(`/runs/${runId}/structure/${path}`)}>View in 3D</button>}
@@ -229,7 +234,7 @@ function ToolForm({ tool, examples, material, submit }) {
       } else if (options) {
         control = <select value={value} required={!uploads[field.name]} disabled={Boolean(uploads[field.name])} onChange={event => set(field.name, event.target.value)}>
           <option value="" disabled>Choose an option</option>
-          {options.map(option => <option key={option} value={option}>{option === material ? option.slice(option.indexOf(':') + 1) + ' · Imported crystal' : option}</option>)}
+          {options.map(option => <option key={option} value={option}>{option === material ? option.slice(option.indexOf(':') + 1) + ' · Imported crystal' : field.labels?.[option] ?? option}</option>)}
         </select>;
       } else if (field.type === 'bool') {
         control = <input type="checkbox" checked={Boolean(value)} onChange={event => set(field.name, event.target.checked)} />;

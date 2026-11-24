@@ -495,7 +495,7 @@ CATALOG: list[UiTool] = [
     UiTool(
         id="run_simulation_using_mlps", func="run_simulation_using_mlps", title="ML potential simulation",
         page="mlp", section="Simulation", cli="2.1–2.4", runtime="seconds", needs=["torch"], gpu=True,
-        summary="Near-DFT accuracy in seconds: relax, EOS, elastic constants or MD with a universal ML potential.",
+        summary="Relax a crystal, fit an equation of state, estimate elastic constants, or run molecular dynamics with a pretrained interatomic potential.",
         help=("**What it does:** replaces DFT with a pre-trained universal machine-learning interatomic potential "
               "(SevenNet, CHGNet, Orb-v3 or MatterSim) inside ASE.\n\n"
               "* **single** – relax atom positions (LBFGS) and report the energy · **eos** – E(V) curve · "
@@ -504,7 +504,7 @@ CATALOG: list[UiTool] = [
         fields={"poscar_path": FieldUI(kind=S, label="Structure"),
                 "mlps_type": FieldUI(kind="segmented", label="Potential", default="CHGNet"),
                 "task_type": FieldUI(kind="segmented", label="Task", default="single",
-                                     option_labels={"single": "Single point / relax", "eos": "EOS", "elastic": "Elastic", "md": "MD"}),
+                                     option_labels={"single": "Geometry relaxation", "eos": "Equation of state", "elastic": "Elastic constants", "md": "Molecular dynamics"}),
                 "fmax": FieldUI(kind="float", label="Force tolerance fmax (eV/Å)", min=0.001, max=10.0, step=0.01,
                                 visible_if=lambda p: p.get("task_type") != "md"),
                 "max_steps": FieldUI(kind="int", label="Max optimiser steps", min=1, max=100000,
